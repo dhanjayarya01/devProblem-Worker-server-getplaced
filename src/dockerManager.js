@@ -29,6 +29,45 @@ function isContainerRunning(containerName) {
     }
 }
 
+export async function restoreSessionsFromDocker() {
+    try {
+        const output = execSync('docker ps --format "{{.Names}}"').toString();
+        const containers = output.split('\n').map(name => name.trim()).filter(Boolean);
+
+        let restoredCount = 0;
+        for (const containerName of containers) {
+            if (containerName.startsWith('session-')) {
+                const sessionId = containerName;
+                try {
+                    // Get port binding
+                    const portOutput = execSync(`docker port ${sessionId} 3000`).toString().trim();
+                    const match = portOutput.match(/(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)/);
+                    if (match) {
+                        const port = parseInt(match[1], 10);
+                        const subdomain = `${sessionId}.${PREVIEW_DOMAIN}`;
+                        activeSessions.set(sessionId, {
+                            sessionId,
+                            subdomain,
+                            containerId: sessionId,
+                            port,
+                            startedAt: new Date().toISOString(),
+                        });
+                        restoredCount++;
+                        console.log(`[Restore] Restored session: ${sessionId} on port ${port}`);
+                    }
+                } catch (e) {
+                    console.warn(`[Restore] Failed to get port for ${sessionId}`);
+                }
+            }
+        }
+        if (restoredCount > 0) {
+            console.log(`[Restore] Successfully restored ${restoredCount} sessions from Docker.`);
+        }
+    } catch (e) {
+        console.error(`[Restore] Failed to query docker containers:`, e.message);
+    }
+}
+
 export async function startContainer(sessionId, workspacePath, hostPort, slug) {
     const normalizedPath = workspacePath.replace(/\\/g, '/');
     const nmVolumeName = `codearena-nm-${slug}`;

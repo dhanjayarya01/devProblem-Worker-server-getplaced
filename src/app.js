@@ -7,7 +7,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { generateFileTree, getFileContent } from './filetree.js';
 import runnerRoutes from './runnerRoutes.js';
 import { PROJECTS_BASE_PATH, SERVER_PORT, PREVIEW_DOMAIN } from './config.js';
-import { activeSessions } from './dockerManager.js';
+import { activeSessions, restoreSessionsFromDocker } from './dockerManager.js';
 
 const app = express();
 
@@ -19,6 +19,8 @@ app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // ── DYNAMIC SUBDOMAIN PROXY ────────────────────────────────────────────────
+const proxyCache = new Map();
+
 app.use((req, res, next) => {
     const hostname = req.hostname || '';
 
@@ -28,7 +30,11 @@ app.use((req, res, next) => {
     }
 
     const sessionId = hostname.slice(0, hostname.indexOf(`.${PREVIEW_DOMAIN}`));
-    console.log(`[Proxy] Detected preview request for: ${hostname} (Session: ${sessionId})`);
+    
+    // Only log actual HTTP requests, skip logging noisy upgrade events
+    if (!req.headers['upgrade']) {
+        console.log(`[Proxy] Detected preview request for: ${hostname} (Session: ${sessionId})`);
+    }
 
     if (!sessionId.startsWith('session-')) {
         return next(); // not a valid session subdomain
@@ -36,32 +42,51 @@ app.use((req, res, next) => {
 
     const session = activeSessions.get(sessionId);
     if (!session) {
+        // Cleanup stale proxy from cache if it exists
+        if (proxyCache.has(sessionId)) {
+            proxyCache.delete(sessionId);
+        }
+
         console.warn(`[Proxy] Unknown or expired session: ${sessionId}`);
-        return res.status(404).send(`
-            <h2>Session not found</h2>
-            <p>Session <code>${sessionId}</code> has expired or does not exist.</p>
-        `);
+        if (typeof res.status === 'function') {
+            return res.status(404).send(`
+                <h2>Session not found</h2>
+                <p>Session <code>${sessionId}</code> has expired or does not exist.</p>
+            `);
+        } else if (res.writable) {
+            // It's a socket (websocket upgrade), gracefully end
+            return res.end();
+        }
+        return;
     }
 
-    console.log(`[Proxy] Forwarding ${req.method} ${req.url} → 127.0.0.1:${session.port}`);
-
-    // Dynamically create a proxy to the container's localhost port
-    // ws: true enables WebSocket proxying (required for Vite HMR)
-    const proxy = createProxyMiddleware({
-        target: `http://127.0.0.1:${session.port}`,
-        changeOrigin: true,
-        ws: true,
-        on: {
-            error: (err, req, res) => {
-                console.error(`[Proxy] Error proxying to port ${session.port}:`, err.message);
-                if (!res.headersSent) {
-                    res.status(502).send('Container is not reachable yet. Please wait a moment.');
-                }
+    // Reuse existing proxy instance to prevent memory leak (MaxListenersExceededWarning)
+    if (!proxyCache.has(sessionId)) {
+        console.log(`[Proxy] Creating new proxy middleware for 127.0.0.1:${session.port}`);
+        const proxy = createProxyMiddleware({
+            target: `http://127.0.0.1:${session.port}`,
+            changeOrigin: true,
+            ws: true,
+            on: {
+                error: (err, req, res) => {
+                    console.error(`[Proxy] Error proxying to 127.0.0.1:${session.port}:`, err.message);
+                    
+                    // Safely check if this is an Express Response object
+                    if (typeof res.status === 'function') {
+                        if (!res.headersSent) {
+                            res.status(502).send('Container is not reachable yet. Please wait a moment.');
+                        }
+                    } else if (res.writable) {
+                        // For raw sockets or websocket upgrades
+                        res.end();
+                    }
+                },
             },
-        },
-    });
+        });
+        proxyCache.set(sessionId, proxy);
+    }
 
-    return proxy(req, res, next);
+    return proxyCache.get(sessionId)(req, res, next);
 });
 
 // ── API ROUTES ─────────────────────────────────────────────────────────────
@@ -141,10 +166,13 @@ app.get('/api/content', (req, res) => {
 // http-proxy-middleware needs access to the raw http.Server for ws:true to work
 const httpServer = createServer(app);
 
-httpServer.listen(SERVER_PORT, () => {
-    console.log(`\n========================================================`);
-    console.log(`🚀 Code Arena Worker running on http://localhost:${SERVER_PORT}`);
-    console.log(`🌐 Preview domain: *.${PREVIEW_DOMAIN}`);
-    console.log(`📂 Projects base: ${PROJECTS_BASE_PATH}`);
-    console.log(`========================================================\n`);
+// Restore running docker containers into memory first, then start listening
+restoreSessionsFromDocker().then(() => {
+    httpServer.listen(SERVER_PORT, () => {
+        console.log(`\n========================================================`);
+        console.log(`🚀 Code Arena Worker running on http://localhost:${SERVER_PORT}`);
+        console.log(`🌐 Preview domain: *.${PREVIEW_DOMAIN}`);
+        console.log(`📂 Projects base: ${PROJECTS_BASE_PATH}`);
+        console.log(`========================================================\n`);
+    });
 });

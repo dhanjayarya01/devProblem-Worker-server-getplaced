@@ -17,7 +17,8 @@ function getDockerUsedPorts() {
     try {
         const output = execSync('docker ps --format "{{.Ports}}"', { encoding: 'utf-8' });
         const usedPorts = new Set();
-        const portPattern = /0\.0\.0\.0:(\d+)->/g;
+        // Match both 0.0.0.0 and 127.0.0.1 port bindings
+        const portPattern = /(?:127\.0\.0\.1|0\.0\.0\.0):(\d+)->/g;
         let match;
         while ((match = portPattern.exec(output)) !== null) {
             usedPorts.add(parseInt(match[1], 10));
