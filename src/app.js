@@ -11,32 +11,24 @@ import { activeSessions } from './dockerManager.js';
 
 const app = express();
 
+// ── TRUST PROXY — REQUIRED for Nginx ───────────────────────────────────────
+app.set('trust proxy', true);
+
 // ── CORS — allow frontend origin ───────────────────────────────────────────
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));
 
 // ── DYNAMIC SUBDOMAIN PROXY ────────────────────────────────────────────────
-// This must come BEFORE all other routes.
-//
-// Flow:
-//   Browser opens: https://session-abc.cinemasync.me
-//   Nginx forwards to this worker on 127.0.0.1:5008 with Host header intact
-//   This middleware reads req.hostname → extracts sessionId → proxies to 127.0.0.1:PORT
-//
-// API routes (/run-project, /save-file, /status etc.) are called from the
-// frontend directly to the worker URL (e.g. http://143.110.184.1:5008),
-// so their Host header is NOT a subdomain of PREVIEW_DOMAIN — they pass through.
 app.use((req, res, next) => {
     const hostname = req.hostname || '';
 
     // Only intercept requests on *.PREVIEW_DOMAIN (e.g. session-abc.cinemasync.me)
-    // The pattern: hostname ends with .PREVIEW_DOMAIN and starts with "session-"
     if (!hostname.endsWith(`.${PREVIEW_DOMAIN}`)) {
         return next(); // not a preview request — pass to API routes
     }
 
-    // Extract sessionId from subdomain: "session-abc.cinemasync.me" → "session-abc"
     const sessionId = hostname.slice(0, hostname.indexOf(`.${PREVIEW_DOMAIN}`));
+    console.log(`[Proxy] Detected preview request for: ${hostname} (Session: ${sessionId})`);
 
     if (!sessionId.startsWith('session-')) {
         return next(); // not a valid session subdomain
@@ -44,15 +36,14 @@ app.use((req, res, next) => {
 
     const session = activeSessions.get(sessionId);
     if (!session) {
-        console.warn(`[Proxy] Unknown session: ${sessionId}`);
+        console.warn(`[Proxy] Unknown or expired session: ${sessionId}`);
         return res.status(404).send(`
             <h2>Session not found</h2>
             <p>Session <code>${sessionId}</code> has expired or does not exist.</p>
-            <p>Go back and click <strong>Prepare to Run</strong> again.</p>
         `);
     }
 
-    console.log(`[Proxy] ${hostname} → 127.0.0.1:${session.port}`);
+    console.log(`[Proxy] Forwarding ${req.method} ${req.url} → 127.0.0.1:${session.port}`);
 
     // Dynamically create a proxy to the container's localhost port
     // ws: true enables WebSocket proxying (required for Vite HMR)
