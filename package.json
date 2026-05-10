@@ -1,0 +1,19 @@
+{
+  "name": "code-arena-worker",
+  "version": "1.0.0",
+  "description": "Code Arena worker: file server + Docker container runner for dev problems",
+  "type": "module",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "dev": "nodemon src/app.js"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "nodemon": "^3.1.14"
+  }
+}
+
