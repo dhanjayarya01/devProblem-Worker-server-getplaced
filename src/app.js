@@ -166,6 +166,25 @@ app.get('/api/content', (req, res) => {
 // http-proxy-middleware needs access to the raw http.Server for ws:true to work
 const httpServer = createServer(app);
 
+// Manually route WebSocket upgrade requests to the correct dynamic proxy instance
+httpServer.on('upgrade', (req, socket, head) => {
+    const hostname = req.headers.host || '';
+    
+    // Only intercept requests for the preview domain
+    if (hostname.endsWith(`.${PREVIEW_DOMAIN}`)) {
+        const sessionId = hostname.slice(0, hostname.indexOf(`.${PREVIEW_DOMAIN}`));
+        
+        // If the proxy for this session exists, forward the websocket!
+        if (proxyCache.has(sessionId)) {
+            proxyCache.get(sessionId).upgrade(req, socket, head);
+            return;
+        }
+    }
+    
+    // Drop the connection if session not found or invalid domain
+    socket.destroy();
+});
+
 // Restore running docker containers into memory first, then start listening
 restoreSessionsFromDocker().then(() => {
     httpServer.listen(SERVER_PORT, () => {
