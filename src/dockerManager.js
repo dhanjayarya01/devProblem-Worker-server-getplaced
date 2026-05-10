@@ -68,9 +68,24 @@ export async function restoreSessionsFromDocker() {
     }
 }
 
-export async function startContainer(sessionId, workspacePath, hostPort, slug) {
+export async function startContainer(sessionId, workspacePath, hostPort, slug, runtimeEnvironment) {
     const normalizedPath = workspacePath.replace(/\\/g, '/');
     const nmVolumeName = `codearena-nm-${slug}`;
+
+    // Apply defaults
+    const baseImage = runtimeEnvironment?.baseImage || 'node:18';
+    const entrypoint = runtimeEnvironment?.entrypoint || 'npm';
+    const args = Array.isArray(runtimeEnvironment?.args) ? runtimeEnvironment.args : ['run', 'dev'];
+    const installCommand = runtimeEnvironment?.installCommand || 'npm install';
+    const port = runtimeEnvironment?.port || 3000;
+
+    // Validate image against whitelist for security
+    const allowedImages = ['node:18', 'node:20', 'python:3.10', 'openjdk:17'];
+    if (!allowedImages.includes(baseImage)) {
+        throw new Error(`Base image ${baseImage} is not allowed for security reasons.`);
+    }
+
+    const startCmd = `${installCommand} && ${entrypoint} ${args.join(' ')}`;
 
     // ── Key change: bind to 127.0.0.1 only — port is NOT publicly accessible ──
     // All traffic comes via nginx → worker proxy → this port
@@ -78,7 +93,7 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug) {
         'docker run -d',
         `--name ${sessionId}`,
         `--restart unless-stopped`,
-        `-p 127.0.0.1:${hostPort}:3000`,          // localhost-only, not 0.0.0.0
+        `-p 127.0.0.1:${hostPort}:${port}`,       // dynamic internal port
         `-v "${normalizedPath}:/app"`,
         `-v "${nmVolumeName}:/app/node_modules"`,
         `-w /app`,
@@ -87,8 +102,8 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug) {
         `-e CHOKIDAR_INTERVAL=1000`,
         `--memory="512m"`,
         `--cpus="0.5"`,
-        `node:18`,
-        `sh -c "npm install && npx vite --host 0.0.0.0 --port 3000"`,
+        baseImage,
+        `sh -c "${startCmd}"`,
     ].join(' ');
 
     console.log(`\n[Docker] Starting container for session: ${sessionId}`);

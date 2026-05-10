@@ -23,7 +23,7 @@ function isHttpReachable(port, timeout = 3000) {
 
 // ── POST /run-project ──────────────────────────────────────────────────────
 router.post('/run-project', async (req, res) => {
-    const { slug } = req.body;
+    const { slug, runtimeEnvironment } = req.body;
     console.log(`\n[RunProject] Request received -> slug: "${slug}"`);
 
     if (!slug || !isValidSlug(slug)) {
@@ -47,7 +47,7 @@ router.post('/run-project', async (req, res) => {
         if (!hostPort) throw new Error('No available ports. Try again later.');
         console.log(`[RunProject] Assigned host port: ${hostPort}`);
 
-        await startContainer(sessionId, workspace.workspacePath, hostPort, slug);
+        await startContainer(sessionId, workspace.workspacePath, hostPort, slug, runtimeEnvironment);
 
         // Return the subdomain URL — no IP:PORT exposed to frontend
         const previewUrl = `https://${sessionId}.${PREVIEW_DOMAIN}`;
