@@ -9,6 +9,9 @@ export const WORKSPACES_BASE_PATH = path.resolve(__dirname, '../../workspaces');
 export const CONTAINER_INTERNAL_PORT = 3000;
 export const PORT_RANGE_MIN = 4100;
 export const PORT_RANGE_MAX = 5000;
-export const MAX_CONTAINERS = 3;
-export const SERVER_HOST = process.env.SERVER_HOST || 'localhost';
-export const SERVER_PORT = process.env.PORT || 4000;
+export const MAX_CONTAINERS = 10;
+export const SERVER_PORT = process.env.PORT || 5008;
+
+// Preview subdomain base — sessions get https://{sessionId}.PREVIEW_DOMAIN
+// Set PREVIEW_DOMAIN env var on server, e.g. PREVIEW_DOMAIN=cinemasync.me
+export const PREVIEW_DOMAIN = process.env.PREVIEW_DOMAIN || 'cinemasync.me';

@@ -1,10 +1,10 @@
 import { exec, execSync } from 'child_process';
 import { promisify } from 'util';
-import { MAX_CONTAINERS } from './config.js';
+import { MAX_CONTAINERS, PREVIEW_DOMAIN } from './config.js';
 
 const execAsync = promisify(exec);
 
-/** In-memory registry of active sessions. Map<sessionId, { port, containerId, slug }> */
+/** In-memory registry. Map<sessionId, { sessionId, subdomain, port, containerId, slug, workspacePath, startedAt }> */
 export const activeSessions = new Map();
 
 export function getActiveContainerCount() {
@@ -33,11 +33,13 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug) {
     const normalizedPath = workspacePath.replace(/\\/g, '/');
     const nmVolumeName = `codearena-nm-${slug}`;
 
+    // ── Key change: bind to 127.0.0.1 only — port is NOT publicly accessible ──
+    // All traffic comes via nginx → worker proxy → this port
     const dockerCmd = [
         'docker run -d',
         `--name ${sessionId}`,
         `--restart unless-stopped`,
-        `-p ${hostPort}:3000`,
+        `-p 127.0.0.1:${hostPort}:3000`,          // localhost-only, not 0.0.0.0
         `-v "${normalizedPath}:/app"`,
         `-v "${nmVolumeName}:/app/node_modules"`,
         `-w /app`,
@@ -63,7 +65,11 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug) {
 
         console.log(`[Docker] ✓ Container started. ID: ${containerId.slice(0, 12)}`);
 
+        // Store full session info including the subdomain
+        const subdomain = `${sessionId}.${PREVIEW_DOMAIN}`;
         activeSessions.set(sessionId, {
+            sessionId,
+            subdomain,
             containerId,
             port: hostPort,
             slug,
@@ -71,6 +77,7 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug) {
             startedAt: new Date().toISOString(),
         });
 
+        console.log(`[Docker] ✓ Preview subdomain: https://${subdomain}`);
         return containerId;
     } catch (err) {
         console.error(`[Docker] ✗ Failed to start container:`, err.message);
@@ -80,20 +87,17 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug) {
 
 export async function stopContainer(sessionId) {
     const session = activeSessions.get(sessionId);
-
     if (!session) {
         console.warn(`[Docker] Session not found in registry: ${sessionId}`);
     }
 
     const containerName = sessionId;
-
     try {
         if (isContainerRunning(containerName)) {
             console.log(`[Docker] Stopping container: ${containerName}`);
             await execAsync(`docker stop ${containerName}`);
             console.log(`[Docker] ✓ Container stopped: ${containerName}`);
         }
-
         try {
             await execAsync(`docker rm ${containerName}`);
             console.log(`[Docker] ✓ Container removed: ${containerName}`);
