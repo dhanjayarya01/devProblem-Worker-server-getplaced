@@ -2,7 +2,7 @@ import express from 'express';
 import http from 'http';
 import { findFreePort } from './portManager.js';
 import { createWorkspace, destroyWorkspace, writeFileToWorkspace, isValidSlug, isValidSessionId } from './workspaceManager.js';
-import { startContainer, stopContainer, getContainerLogs, getActiveContainerCount, getAllSessions, activeSessions } from './dockerManager.js';
+import { startContainer, stopContainer, executeTest, getContainerLogs, getActiveContainerCount, getAllSessions, activeSessions } from './dockerManager.js';
 import { MAX_CONTAINERS, PREVIEW_DOMAIN } from './config.js';
 
 const router = express.Router();
@@ -67,6 +67,24 @@ router.post('/run-project', async (req, res) => {
             try { await destroyWorkspace(sessionId); } catch (_) {}
         }
         return res.status(err.status || 500).json({ error: err.message });
+    }
+});
+
+// ── POST /run-tests ────────────────────────────────────────────────────────
+router.post('/run-tests', async (req, res) => {
+    const { sessionId } = req.body;
+    console.log(`\n[RunTests] Request received -> sessionId: "${sessionId}"`);
+
+    if (!sessionId) {
+        return res.status(400).json({ error: 'Session ID is required' });
+    }
+
+    try {
+        const result = await executeTest(sessionId);
+        return res.json(result);
+    } catch (e) {
+        console.error(`[RunTests] Error:`, e.message);
+        return res.status(500).json({ error: e.message || 'Failed to run tests' });
     }
 });
 

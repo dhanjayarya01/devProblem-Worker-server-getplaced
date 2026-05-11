@@ -38,8 +38,14 @@ function isValidSlug(slug) {
 
 async function createWorkspace(slug) {
     const sourceDir = path.join(PROJECTS_BASE_PATH, slug);
+    const templateDir = path.join(sourceDir, 'template');
+    const hiddenTestsDir = path.join(sourceDir, 'hidden-tests');
 
-    if (!fs.existsSync(sourceDir)) {
+    // Fallback: if 'template' folder doesn't exist, maybe it's an old project structure
+    const isNewStructure = fs.existsSync(templateDir);
+    const copyTarget = isNewStructure ? templateDir : sourceDir;
+
+    if (!fs.existsSync(copyTarget)) {
         const err = new Error(`Problem slug "${slug}" not found on disk`);
         err.status = 404;
         throw err;
@@ -51,7 +57,14 @@ async function createWorkspace(slug) {
     fs.mkdirSync(WORKSPACES_BASE_PATH, { recursive: true });
 
     console.log(`[Workspace] Copying "${slug}" -> "${workspacePath}"`);
-    copyDirSync(sourceDir, workspacePath);
+    copyDirSync(copyTarget, workspacePath);
+
+    // If new structure and hidden-tests exists, overlay them directly into the workspace
+    if (isNewStructure && fs.existsSync(hiddenTestsDir)) {
+        console.log(`[Workspace] Injecting hidden tests for "${slug}"`);
+        copyDirSync(hiddenTestsDir, workspacePath);
+    }
+
     console.log(`[Workspace] ✓ Workspace created: ${sessionId}`);
 
     return { sessionId, workspacePath };

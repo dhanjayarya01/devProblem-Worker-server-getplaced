@@ -128,6 +128,7 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug, r
             port: hostPort,
             slug,
             workspacePath,
+            testCommand: runtimeEnv.testCommand || 'npm test',
             startedAt: new Date().toISOString(),
         });
 
@@ -172,5 +173,30 @@ export async function getContainerLogs(sessionId, tail = 50) {
         return stdout;
     } catch (err) {
         throw new Error(`Could not fetch container logs: ${err.message}`);
+    }
+}
+
+export async function executeTest(sessionId) {
+    const session = activeSessions.get(sessionId);
+    if (!session) {
+        throw new Error(`Session ${sessionId} not found`);
+    }
+
+    const { containerId, testCommand } = session;
+    console.log(`\n[Docker Exec] Running tests for ${sessionId} using command: ${testCommand}`);
+
+    try {
+        const { stdout, stderr } = await execAsync(`docker exec ${containerId} sh -c "${testCommand}"`);
+        console.log(`[Docker Exec] ✓ Tests completed for ${sessionId}`);
+        return {
+            success: true,
+            logs: stdout + (stderr ? '\n' + stderr : '')
+        };
+    } catch (err) {
+        console.warn(`[Docker Exec] ✗ Tests failed for ${sessionId}`);
+        return {
+            success: false,
+            logs: (err.stdout || '') + (err.stderr ? '\n' + err.stderr : '') + '\n' + err.message
+        };
     }
 }

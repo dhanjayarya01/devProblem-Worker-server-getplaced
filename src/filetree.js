@@ -8,7 +8,20 @@ function generateFileTree(dirPath, relativeTo = '') {
         const items = fs.readdirSync(dirPath);
 
         for (const item of items) {
-            if (item === 'node_modules' || item === '.git' || item === '.next') continue;
+            if (
+                item === 'node_modules' || 
+                item === '.git' || 
+                item === '.next' ||
+                item === 'hidden-tests' ||
+                item === '__tests__' ||
+                item === 'vitest.config.js' ||
+                item === 'setupTests.js' ||
+                item.endsWith('.test.js') ||
+                item.endsWith('.test.jsx') ||
+                item.startsWith('test_') ||
+                item.endsWith('Test.java') ||
+                item.endsWith('Tests.java')
+            ) continue;
 
             const fullPath = path.join(dirPath, item);
             const relativePath = path.join(relativeTo, item).replace(/\\/g, '/');
