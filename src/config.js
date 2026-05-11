@@ -5,7 +5,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Make folder name configurable. Remote server uses 'getplaced-codearena', local uses 'codearenaproject'
-const projectsDir = process.env.PROJECTS_DIR_NAME || 'codearenaproject';
+const projectsDir = process.env.PROJECTS_DIR_NAME || 'getplaced-codearena';
 export const PROJECTS_BASE_PATH = path.resolve(__dirname, '../../', projectsDir);
 export const WORKSPACES_BASE_PATH = path.resolve(__dirname, '../../workspaces');
 export const CONTAINER_INTERNAL_PORT = 3000;

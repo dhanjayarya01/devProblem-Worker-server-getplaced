@@ -127,7 +127,12 @@ app.get('/api/tree/:slug', (req, res) => {
         return res.status(404).json({ error: `Problem directory '${slug}' not found` });
     }
 
-    const tree = generateFileTree(problemPath);
+    let targetPath = problemPath;
+    if (fs.existsSync(path.join(problemPath, 'template'))) {
+        targetPath = path.join(problemPath, 'template');
+    }
+
+    const tree = generateFileTree(targetPath);
     if (!tree) return res.status(500).json({ error: 'Failed to generate file tree' });
 
     console.log(`[✓] File tree sent for: "${slug}"`);
