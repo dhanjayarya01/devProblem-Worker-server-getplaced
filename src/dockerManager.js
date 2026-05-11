@@ -128,7 +128,7 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug, r
             port: hostPort,
             slug,
             workspacePath,
-            testCommand: runtimeEnv.testCommand || 'npm test',
+            testCommand: runtimeEnvironment?.testCommand || 'npm test',
             startedAt: new Date().toISOString(),
         });
 
