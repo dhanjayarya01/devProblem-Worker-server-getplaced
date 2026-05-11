@@ -148,8 +148,14 @@ app.get('/api/content', (req, res) => {
         return res.status(400).json({ error: "Both 'problem' and 'file' are required" });
     }
 
-    const fullPath = path.join(PROJECTS_BASE_PATH, problem, file);
-    if (!fullPath.startsWith(path.join(PROJECTS_BASE_PATH, problem))) {
+    const problemPath = path.join(PROJECTS_BASE_PATH, problem);
+    let targetPath = problemPath;
+    if (fs.existsSync(path.join(problemPath, 'template'))) {
+        targetPath = path.join(problemPath, 'template');
+    }
+
+    const fullPath = path.join(targetPath, file);
+    if (!fullPath.startsWith(targetPath)) {
         return res.status(403).json({ error: 'Invalid file path' });
     }
     if (!fs.existsSync(fullPath)) {
