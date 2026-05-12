@@ -213,24 +213,37 @@ export async function executeCommand(sessionId, command) {
     const blockList = ['sudo', 'su ', 'apt', 'apk', 'yum', 'chown', 'shutdown', 'reboot', 'mkfs', 'mount'];
     const lowerCmd = command.toLowerCase();
     for (const blocked of blockList) {
-        // Simple word boundary check or inclusion check
         if (lowerCmd.includes(blocked) || lowerCmd.startsWith(blocked.trim())) {
             throw new Error(`Command blocked for security reasons.`);
         }
     }
 
-    // Also block absolute paths that try to leave /app, although docker is isolated anyway.
     if (lowerCmd.includes('rm -rf / ') || lowerCmd.includes('rm -rf /*')) {
          throw new Error(`Command blocked for security reasons.`);
     }
 
     const { containerId } = session;
-    console.log(`\n[Docker Exec] Running command for ${sessionId}: ${command}`);
+    let cmdCwd = session.cwd || '/app';
+
+    // Handle `cd` explicitly because docker exec runs in a fresh shell each time
+    const trimmed = command.trim();
+    if (trimmed.startsWith('cd ') || trimmed === 'cd') {
+        const target = trimmed === 'cd' ? '/app' : trimmed.substring(3).trim();
+        try {
+            // Verify directory exists and resolve the absolute path
+            const { stdout } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "cd ${target} && pwd"`);
+            session.cwd = stdout.trim();
+            return { success: true, logs: '' };
+        } catch (err) {
+            return { success: false, logs: err.stderr || err.message };
+        }
+    }
+
+    console.log(`\n[Docker Exec] Running command for ${sessionId} in ${cmdCwd}: ${command}`);
 
     try {
-        // Run in the /app directory. Replace double quotes to prevent breaking out of sh -c ""
         const sanitizedCommand = command.replace(/"/g, '\\"');
-        const { stdout, stderr } = await execAsync(`docker exec -w /app ${containerId} sh -c "${sanitizedCommand}"`);
+        const { stdout, stderr } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "${sanitizedCommand}"`);
         return {
             success: true,
             logs: stdout + (stderr ? '\n' + stderr : '')
