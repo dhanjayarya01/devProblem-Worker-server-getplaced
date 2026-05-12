@@ -1,8 +1,9 @@
 import express from 'express';
 import http from 'http';
 import { findFreePort } from './portManager.js';
-import { createWorkspace, destroyWorkspace, writeFileToWorkspace, isValidSlug, isValidSessionId } from './workspaceManager.js';
-import { startContainer, stopContainer, executeTest, getContainerLogs, getActiveContainerCount, getAllSessions, activeSessions } from './dockerManager.js';
+import { createWorkspace, destroyWorkspace, writeFileToWorkspace, createWorkspaceItem, deleteWorkspaceItem, getWorkspacePath, isValidSlug, isValidSessionId } from './workspaceManager.js';
+import { startContainer, stopContainer, executeTest, getContainerLogs, executeCommand, getActiveContainerCount, getAllSessions, activeSessions } from './dockerManager.js';
+import { generateFileTree } from './filetree.js';
 import { MAX_CONTAINERS, PREVIEW_DOMAIN } from './config.js';
 
 const router = express.Router();
@@ -88,6 +89,26 @@ router.post('/run-tests', async (req, res) => {
     }
 });
 
+// ── POST /execute-command ──────────────────────────────────────────────────
+router.post('/execute-command', async (req, res) => {
+    const { sessionId, command } = req.body;
+    
+    if (!sessionId || !isValidSessionId(sessionId)) {
+        return res.status(400).json({ error: 'Invalid or missing sessionId' });
+    }
+    if (!command) {
+        return res.status(400).json({ error: 'command is required' });
+    }
+
+    try {
+        const result = await executeCommand(sessionId, command);
+        return res.json(result);
+    } catch (err) {
+        console.error(`[ExecuteCommand] Error:`, err.message);
+        return res.status(err.status || 500).json({ error: err.message, success: false });
+    }
+});
+
 // ── POST /stop-project ─────────────────────────────────────────────────────
 router.post('/stop-project', async (req, res) => {
     const { sessionId } = req.body;
@@ -124,6 +145,60 @@ router.post('/save-file', async (req, res) => {
         await writeFileToWorkspace(sessionId, filePath, content);
         console.log(`[SaveFile] ✓ Saved -> ${sessionId}/${filePath}`);
         return res.json({ success: true, message: 'File saved. Container will auto-reload.' });
+    } catch (err) {
+        return res.status(err.status || 500).json({ error: err.message });
+    }
+});
+
+// ── POST /workspace/create ─────────────────────────────────────────────────
+router.post('/workspace/create', async (req, res) => {
+    const { sessionId, filePath, isFolder } = req.body;
+    if (!sessionId || !isValidSessionId(sessionId)) {
+        return res.status(400).json({ error: 'Invalid or missing sessionId' });
+    }
+    if (!filePath) {
+        return res.status(400).json({ error: 'filePath is required' });
+    }
+
+    try {
+        await createWorkspaceItem(sessionId, filePath, isFolder);
+        return res.json({ success: true, message: `${isFolder ? 'Folder' : 'File'} created successfully.` });
+    } catch (err) {
+        return res.status(err.status || 500).json({ error: err.message });
+    }
+});
+
+// ── POST /workspace/delete ─────────────────────────────────────────────────
+router.post('/workspace/delete', async (req, res) => {
+    const { sessionId, filePath } = req.body;
+    if (!sessionId || !isValidSessionId(sessionId)) {
+        return res.status(400).json({ error: 'Invalid or missing sessionId' });
+    }
+    if (!filePath) {
+        return res.status(400).json({ error: 'filePath is required' });
+    }
+
+    try {
+        await deleteWorkspaceItem(sessionId, filePath);
+        return res.json({ success: true, message: `Deleted successfully.` });
+    } catch (err) {
+        return res.status(err.status || 500).json({ error: err.message });
+    }
+});
+
+// ── GET /workspace/tree/:sessionId ─────────────────────────────────────────
+router.get('/workspace/tree/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    if (!sessionId || !isValidSessionId(sessionId)) {
+        return res.status(400).json({ error: 'Invalid sessionId' });
+    }
+
+    try {
+        const workspacePath = getWorkspacePath(sessionId);
+        const tree = generateFileTree(workspacePath);
+        if (!tree) return res.status(500).json({ error: 'Failed to generate file tree from workspace' });
+        
+        return res.json({ sessionId, tree });
     } catch (err) {
         return res.status(err.status || 500).json({ error: err.message });
     }

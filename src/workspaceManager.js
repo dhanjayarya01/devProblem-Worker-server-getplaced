@@ -95,10 +95,58 @@ async function writeFileToWorkspace(sessionId, relativePath, content) {
     console.log(`[Workspace] ✓ File written: ${sessionId}/${relativePath}`);
 }
 
+async function createWorkspaceItem(sessionId, relativePath, isFolder) {
+    const workspacePath = getWorkspacePath(sessionId);
+    const fullPath = path.join(workspacePath, relativePath);
+
+    if (!fullPath.startsWith(workspacePath)) {
+        const err = new Error('Invalid path');
+        err.status = 403;
+        throw err;
+    }
+
+    if (fs.existsSync(fullPath)) {
+        const err = new Error('Path already exists');
+        err.status = 400;
+        throw err;
+    }
+
+    if (isFolder) {
+        fs.mkdirSync(fullPath, { recursive: true });
+        console.log(`[Workspace] ✓ Folder created: ${sessionId}/${relativePath}`);
+    } else {
+        fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+        fs.writeFileSync(fullPath, '', 'utf-8');
+        console.log(`[Workspace] ✓ File created: ${sessionId}/${relativePath}`);
+    }
+}
+
+async function deleteWorkspaceItem(sessionId, relativePath) {
+    const workspacePath = getWorkspacePath(sessionId);
+    const fullPath = path.join(workspacePath, relativePath);
+
+    if (!fullPath.startsWith(workspacePath)) {
+        const err = new Error('Invalid path');
+        err.status = 403;
+        throw err;
+    }
+
+    if (!fs.existsSync(fullPath)) {
+        const err = new Error('Path not found');
+        err.status = 404;
+        throw err;
+    }
+
+    fs.rmSync(fullPath, { recursive: true, force: true });
+    console.log(`[Workspace] ✓ Deleted: ${sessionId}/${relativePath}`);
+}
+
 export {
     createWorkspace,
     destroyWorkspace,
     writeFileToWorkspace,
+    createWorkspaceItem,
+    deleteWorkspaceItem,
     getWorkspacePath,
     isValidSessionId,
     isValidSlug,

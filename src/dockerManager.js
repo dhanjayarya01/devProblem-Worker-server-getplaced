@@ -202,3 +202,43 @@ export async function executeTest(sessionId) {
         };
     }
 }
+
+export async function executeCommand(sessionId, command) {
+    const session = activeSessions.get(sessionId);
+    if (!session) {
+        throw new Error(`Session ${sessionId} not found`);
+    }
+
+    // Basic security blocklist to prevent breaking container isolation
+    const blockList = ['sudo', 'su ', 'apt', 'apk', 'yum', 'chown', 'shutdown', 'reboot', 'mkfs', 'mount'];
+    const lowerCmd = command.toLowerCase();
+    for (const blocked of blockList) {
+        // Simple word boundary check or inclusion check
+        if (lowerCmd.includes(blocked) || lowerCmd.startsWith(blocked.trim())) {
+            throw new Error(`Command blocked for security reasons.`);
+        }
+    }
+
+    // Also block absolute paths that try to leave /app, although docker is isolated anyway.
+    if (lowerCmd.includes('rm -rf / ') || lowerCmd.includes('rm -rf /*')) {
+         throw new Error(`Command blocked for security reasons.`);
+    }
+
+    const { containerId } = session;
+    console.log(`\n[Docker Exec] Running command for ${sessionId}: ${command}`);
+
+    try {
+        // Run in the /app directory. Replace double quotes to prevent breaking out of sh -c ""
+        const sanitizedCommand = command.replace(/"/g, '\\"');
+        const { stdout, stderr } = await execAsync(`docker exec -w /app ${containerId} sh -c "${sanitizedCommand}"`);
+        return {
+            success: true,
+            logs: stdout + (stderr ? '\n' + stderr : '')
+        };
+    } catch (err) {
+        return {
+            success: false,
+            logs: (err.stdout || '') + (err.stderr ? '\n' + err.stderr : '') + '\n' + err.message
+        };
+    }
+}
