@@ -96,12 +96,14 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug, r
         `-p 127.0.0.1:${hostPort}:${port}`,       // dynamic internal port
         `-v "${normalizedPath}:/app"`,
         `-v "${nmVolumeName}:/app/node_modules"`,
+        `-v "codearena-m2-cache:/root/.m2"`,
         `-w /app`,
         `-e HOST=0.0.0.0`,
+        `-e SERVER_ADDRESS=0.0.0.0`,
         `-e CHOKIDAR_USEPOLLING=true`,
         `-e CHOKIDAR_INTERVAL=1000`,
-        `--memory="512m"`,
-        `--cpus="0.5"`,
+        `--memory="1g"`,
+        `--cpus="1.0"`,
         baseImage,
         `sh -c "${startCmd}"`,
     ].join(' ');
