@@ -69,21 +69,31 @@ app.use((req, res, next) => {
             ws: true,
             on: {
                 error: (err, req, res) => {
-                    // Suppress noisy socket hang up logs from Vite HMR
-                    if (err.code !== 'ECONNRESET' && err.message !== 'socket hang up') {
+                    // These are all normal for Vite HMR/SSE — the client closes the
+                    // connection before the proxy finishes writing. Suppress them.
+                    const IGNORED = ['ECONNRESET', 'EPIPE', 'ERR_STREAM_DESTROYED'];
+                    const isIgnored =
+                        IGNORED.includes(err.code) ||
+                        err.message === 'socket hang up' ||
+                        err.message === 'write after end' ||
+                        err.message?.includes('write EPIPE');
+
+                    if (!isIgnored) {
                         console.error(`[Proxy] Error proxying to 127.0.0.1:${session.port}:`, err.message);
                     }
-                    
-                    // Safely check if this is an Express Response object
-                    if (res && typeof res.status === 'function') {
-                        if (!res.headersSent) {
-                            res.status(502).send('Container is not reachable yet. Please wait a moment.');
+
+                    // If it's a normal Express response that hasn't been flushed yet, send 502
+                    if (res && typeof res.headersSent === 'boolean') {
+                        if (!res.headersSent && typeof res.status === 'function') {
+                            try { res.status(502).send('Container not reachable yet.'); } catch (_) {}
                         }
-                    } else if (res && typeof res.destroy === 'function') {
-                        // For raw sockets or websocket upgrades, completely destroy the socket to prevent "write after end"
-                        res.destroy();
-                    } else if (req && req.socket && typeof req.socket.destroy === 'function') {
-                        req.socket.destroy();
+                        return;
+                    }
+
+                    // Raw socket (WebSocket upgrade) — destroy safely
+                    const socket = res?.socket ?? req?.socket;
+                    if (socket && !socket.destroyed) {
+                        try { socket.destroy(); } catch (_) {}
                     }
                 },
             },
