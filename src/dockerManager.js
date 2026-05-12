@@ -80,7 +80,7 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug, r
     const port = runtimeEnvironment?.port || 3000;
 
     // Validate image against whitelist for security
-    const allowedImages = ['node:18', 'node:20', 'python:3.10', 'openjdk:17'];
+    const allowedImages = ['node:18', 'node:20', 'python:3.10', 'openjdk:17', 'maven:3.8-eclipse-temurin-17', 'eclipse-temurin:17-jdk'];
     if (!allowedImages.includes(baseImage)) {
         throw new Error(`Base image ${baseImage} is not allowed for security reasons.`);
     }
