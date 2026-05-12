@@ -69,16 +69,21 @@ app.use((req, res, next) => {
             ws: true,
             on: {
                 error: (err, req, res) => {
-                    console.error(`[Proxy] Error proxying to 127.0.0.1:${session.port}:`, err.message);
+                    // Suppress noisy socket hang up logs from Vite HMR
+                    if (err.code !== 'ECONNRESET' && err.message !== 'socket hang up') {
+                        console.error(`[Proxy] Error proxying to 127.0.0.1:${session.port}:`, err.message);
+                    }
                     
                     // Safely check if this is an Express Response object
-                    if (typeof res.status === 'function') {
+                    if (res && typeof res.status === 'function') {
                         if (!res.headersSent) {
                             res.status(502).send('Container is not reachable yet. Please wait a moment.');
                         }
-                    } else if (res.writable) {
-                        // For raw sockets or websocket upgrades
-                        res.end();
+                    } else if (res && typeof res.destroy === 'function') {
+                        // For raw sockets or websocket upgrades, completely destroy the socket to prevent "write after end"
+                        res.destroy();
+                    } else if (req && req.socket && typeof req.socket.destroy === 'function') {
+                        req.socket.destroy();
                     }
                 },
             },
