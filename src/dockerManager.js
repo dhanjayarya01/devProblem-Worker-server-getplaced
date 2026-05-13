@@ -241,9 +241,13 @@ export async function executeCommand(sessionId, command) {
 
     console.log(`\n[Docker Exec] Running command for ${sessionId} in ${cmdCwd}: ${command}`);
 
+    // Use a longer timeout for mvn compile which can take time on first run
+    const isMvnCompile = command.trim().startsWith('mvn compile');
+    const execOptions = isMvnCompile ? { timeout: 90000 } : {};
+
     try {
         const sanitizedCommand = command.replace(/"/g, '\\"');
-        const { stdout, stderr } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "${sanitizedCommand}"`);
+        const { stdout, stderr } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "${sanitizedCommand}"`, execOptions);
         return {
             success: true,
             logs: stdout + (stderr ? '\n' + stderr : '')
