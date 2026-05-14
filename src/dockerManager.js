@@ -45,12 +45,18 @@ export async function restoreSessionsFromDocker() {
                     if (match) {
                         const port = parseInt(match[1], 10);
                         const subdomain = `${sessionId}.${PREVIEW_DOMAIN}`;
+                        const now = Date.now();
                         activeSessions.set(sessionId, {
                             sessionId,
                             subdomain,
                             containerId: sessionId,
                             port,
-                            startedAt: new Date().toISOString(),
+                            // We don't know the real startedAt after a restart — use now so
+                            // the 90-min hard cap counts from the restore point, not from epoch 0.
+                            startedAt: now,
+                            // Give the session a full idle TTL from now so it isn't immediately
+                            // killed before the user's browser can reconnect and start sending beats.
+                            lastHeartbeat: now,
                         });
                         restoredCount++;
                         console.log(`[Restore] Restored session: ${sessionId} on port ${port}`);
@@ -123,6 +129,7 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug, r
 
         // Store full session info including the subdomain
         const subdomain = `${sessionId}.${PREVIEW_DOMAIN}`;
+        const now = Date.now();
         activeSessions.set(sessionId, {
             sessionId,
             subdomain,
@@ -131,7 +138,8 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug, r
             slug,
             workspacePath,
             testCommand: runtimeEnvironment?.testCommand || 'npm test',
-            startedAt: new Date().toISOString(),
+            startedAt: now,
+            lastHeartbeat: now,   // ← tracks last ping from frontend
         });
 
         console.log(`[Docker] ✓ Preview subdomain: https://${subdomain}`);

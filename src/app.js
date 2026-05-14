@@ -7,7 +7,7 @@ import { createProxyMiddleware } from 'http-proxy-middleware';
 import { generateFileTree, getFileContent } from './filetree.js';
 import runnerRoutes from './runnerRoutes.js';
 import { PROJECTS_BASE_PATH, SERVER_PORT, PREVIEW_DOMAIN } from './config.js';
-import { activeSessions, restoreSessionsFromDocker } from './dockerManager.js';
+import { activeSessions, restoreSessionsFromDocker, stopContainer } from './dockerManager.js';
 
 const app = express();
 
@@ -127,6 +127,99 @@ app.get('/', (req, res) => {
     });
 });
 
+// ── SESSION LIFETIME CONSTANTS ─────────────────────────────────────────────
+const HEARTBEAT_TTL_MS = 10 * 60 * 1000;   // 10 min idle → stop
+const MAX_SESSION_AGE_MS = 90 * 60 * 1000; // 90 min hard cap
+
+// ── HEARTBEAT ENDPOINT ──────────────────────────────────────────────────────
+// Frontend sends POST /heartbeat/:sessionId every 30s while the Code Arena
+// tab is visible (paused when tab is hidden via visibilitychange event).
+app.post('/heartbeat/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+    const session = activeSessions.get(sessionId);
+    if (!session) {
+        // Session was auto-stopped — tell the frontend so it can update its UI
+        return res.status(404).json({ ok: false, terminated: true, message: 'Session was auto-stopped' });
+    }
+    const now = Date.now();
+
+    // Compute remaining time BEFORE updating lastHeartbeat
+    const prevBeat = session.lastHeartbeat || session.startedAt;
+    const idleSince = now - prevBeat;
+    const age = now - session.startedAt;
+    const remainingIdleMs = Math.max(0, HEARTBEAT_TTL_MS - idleSince);
+    const remainingAgeMs  = Math.max(0, MAX_SESSION_AGE_MS - age);
+    const remainingMs     = Math.min(remainingIdleMs, remainingAgeMs);
+    const warning         = remainingMs < 2 * 60 * 1000; // warn when < 2 min left
+
+    // Now update the heartbeat
+    session.lastHeartbeat = now;
+
+    return res.json({
+        ok: true,
+        sessionId,
+        remainingMs,
+        warning,
+        warningMessage: warning ? `Session expires in ~${Math.ceil(remainingMs / 60000)} min` : null,
+    });
+});
+
+// ── AUTO-CLEANUP INTERVAL ───────────────────────────────────────────────────
+// Runs every 2 minutes. Stops containers that breach either threshold:
+//   • Idle > 10 min  (no heartbeat)  → user left the page
+//   • Age  > 90 min  (hard cap)      → always expires regardless of activity
+
+setInterval(async () => {
+    const now = Date.now();
+    const stale = [];
+
+    activeSessions.forEach((session, sessionId) => {
+        const lastBeat = session.lastHeartbeat || session.startedAt;
+        const idleSince = now - lastBeat;
+        const age = now - session.startedAt;
+
+        if (idleSince > HEARTBEAT_TTL_MS) {
+            stale.push({ sessionId, reason: `Idle ${Math.round(idleSince / 60000)}min (no heartbeat)` });
+        } else if (age > MAX_SESSION_AGE_MS) {
+            stale.push({ sessionId, reason: `Max age ${Math.round(age / 60000)}min exceeded` });
+        }
+    });
+
+    for (const { sessionId, reason } of stale) {
+        // ── Liveness check before killing ────────────────────────────────────
+        // The container may have already exited on its own (OOM, crash, etc.).
+        // Check Docker first — avoids a misleading error log if it's already gone.
+        let isRunning = false;
+        try {
+            const { execSync } = await import('child_process');
+            const out = execSync(
+                `docker ps --filter "name=${sessionId}" --format "{{.Names}}"`,
+                { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
+            ).trim();
+            isRunning = out.includes(sessionId);
+        } catch { isRunning = false; }
+
+        if (!isRunning) {
+            // Container already gone — just clean up our registry
+            activeSessions.delete(sessionId);
+            console.log(`[Cleanup] 🧹 Cleared stale registry entry: ${sessionId} (container already gone)`);
+            continue;
+        }
+
+        console.log(`\n[Cleanup] 🛑 Auto-stopping: ${sessionId} — ${reason}`);
+        try {
+            await stopContainer(sessionId);
+            console.log(`[Cleanup] ✓ Stopped: ${sessionId}`);
+        } catch (err) {
+            console.error(`[Cleanup] ✗ Failed to stop ${sessionId}:`, err.message);
+        }
+    }
+
+    if (activeSessions.size > 0 && stale.length === 0) {
+        console.log(`[Cleanup] ✓ ${activeSessions.size} session(s) healthy`);
+    }
+}, 2 * 60 * 1000);
+
 // ── FILE TREE ROUTE ────────────────────────────────────────────────────────
 app.get('/api/tree/:slug', (req, res) => {
     const { slug } = req.params;
@@ -210,6 +303,13 @@ httpServer.on('upgrade', (req, socket, head) => {
     // Drop the connection if session not found or invalid domain
     socket.destroy();
 });
+
+// Suppress MaxListenersExceededWarning:
+// Each Vite HMR/WebSocket connection adds error+close listeners to the same
+// server/socket. With many concurrent preview tabs this can exceed Node's
+// default limit of 10. Setting to 0 disables the cap — safe here because
+// all listeners are intentionally added by the proxy middleware.
+httpServer.setMaxListeners(0);
 
 // Restore running docker containers into memory first, then start listening
 restoreSessionsFromDocker().then(() => {
