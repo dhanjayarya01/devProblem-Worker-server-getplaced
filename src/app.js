@@ -226,9 +226,17 @@ setInterval(async () => {
         console.log(`\n[Cleanup] 🛑 Auto-stopping: ${sessionId} — ${reason}`);
         try {
             await stopContainer(sessionId);
-            console.log(`[Cleanup] ✓ Stopped: ${sessionId}`);
+            console.log(`[Cleanup] ✓ Stopped container: ${sessionId}`);
         } catch (err) {
-            console.error(`[Cleanup] ✗ Failed to stop ${sessionId}:`, err.message);
+            console.error(`[Cleanup] ✗ Failed to stop container ${sessionId}:`, err.message);
+        }
+        
+        try {
+            const { destroyWorkspace } = await import('./workspaceManager.js');
+            await destroyWorkspace(sessionId);
+            console.log(`[Cleanup] ✓ Destroyed workspace: ${sessionId}`);
+        } catch (err) {
+            console.error(`[Cleanup] ✗ Failed to destroy workspace ${sessionId}:`, err.message);
         }
     }
 
