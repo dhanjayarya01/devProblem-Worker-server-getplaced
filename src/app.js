@@ -136,9 +136,9 @@ const MAX_SESSION_AGE_MS = 90 * 60 * 1000; // 90 min hard cap
 // tab is visible (paused when tab is hidden via visibilitychange event).
 app.post('/heartbeat/:sessionId', (req, res) => {
     const { sessionId } = req.params;
+    const { tabHidden } = req.body || {};   // frontend sends { tabHidden: true } on visibilitychange → hidden
     const session = activeSessions.get(sessionId);
     if (!session) {
-        // Session was auto-stopped — tell the frontend so it can update its UI
         return res.status(404).json({ ok: false, terminated: true, message: 'Session was auto-stopped' });
     }
     const now = Date.now();
@@ -150,10 +150,21 @@ app.post('/heartbeat/:sessionId', (req, res) => {
     const remainingIdleMs = Math.max(0, HEARTBEAT_TTL_MS - idleSince);
     const remainingAgeMs  = Math.max(0, MAX_SESSION_AGE_MS - age);
     const remainingMs     = Math.min(remainingIdleMs, remainingAgeMs);
-    const warning         = remainingMs < 2 * 60 * 1000; // warn when < 2 min left
+    const warning         = remainingMs < 2 * 60 * 1000;
 
-    // Now update the heartbeat
+    // Update heartbeat and tab-visibility state
     session.lastHeartbeat = now;
+    if (tabHidden) {
+        if (!session.tabHiddenAt) {
+            session.tabHiddenAt = now;
+            console.log(`[Heartbeat] Tab hidden for ${sessionId} — 1-min grace timer started`);
+        }
+    } else {
+        if (session.tabHiddenAt) {
+            console.log(`[Heartbeat] Tab visible again for ${sessionId} — grace timer cancelled`);
+        }
+        session.tabHiddenAt = null;   // tab is visible — cancel grace timer
+    }
 
     return res.json({
         ok: true,
@@ -161,6 +172,7 @@ app.post('/heartbeat/:sessionId', (req, res) => {
         remainingMs,
         warning,
         warningMessage: warning ? `Session expires in ~${Math.ceil(remainingMs / 60000)} min` : null,
+        tabHidden: !!session.tabHiddenAt,
     });
 });
 
@@ -168,6 +180,8 @@ app.post('/heartbeat/:sessionId', (req, res) => {
 // Runs every 2 minutes. Stops containers that breach either threshold:
 //   • Idle > 10 min  (no heartbeat)  → user left the page
 //   • Age  > 90 min  (hard cap)      → always expires regardless of activity
+
+const TAB_HIDDEN_GRACE_MS = 1 * 60 * 1000;  // 1 min after tab hidden → stop
 
 setInterval(async () => {
     const now = Date.now();
@@ -178,7 +192,10 @@ setInterval(async () => {
         const idleSince = now - lastBeat;
         const age = now - session.startedAt;
 
-        if (idleSince > HEARTBEAT_TTL_MS) {
+        // Grace period: tab was hidden and user hasn't returned within 1 min
+        if (session.tabHiddenAt && (now - session.tabHiddenAt) > TAB_HIDDEN_GRACE_MS) {
+            stale.push({ sessionId, reason: `Tab hidden ${Math.round((now - session.tabHiddenAt) / 1000)}s ago (grace period expired)` });
+        } else if (idleSince > HEARTBEAT_TTL_MS) {
             stale.push({ sessionId, reason: `Idle ${Math.round(idleSince / 60000)}min (no heartbeat)` });
         } else if (age > MAX_SESSION_AGE_MS) {
             stale.push({ sessionId, reason: `Max age ${Math.round(age / 60000)}min exceeded` });
@@ -304,12 +321,12 @@ httpServer.on('upgrade', (req, socket, head) => {
     socket.destroy();
 });
 
-// Suppress MaxListenersExceededWarning:
-// Each Vite HMR/WebSocket connection adds error+close listeners to the same
-// server/socket. With many concurrent preview tabs this can exceed Node's
-// default limit of 10. Setting to 0 disables the cap — safe here because
-// all listeners are intentionally added by the proxy middleware.
+// Fix MaxListenersExceededWarning at both server AND socket level:
+// Vite HMR attaches error+close handlers to every individual socket object.
+// httpServer.setMaxListeners(0)  → silences warnings on the server emitter
+// 'connection' hook               → silences warnings on each accepted socket
 httpServer.setMaxListeners(0);
+httpServer.on('connection', (socket) => socket.setMaxListeners(0));
 
 // Restore running docker containers into memory first, then start listening
 restoreSessionsFromDocker().then(() => {

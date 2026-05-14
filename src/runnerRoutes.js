@@ -255,4 +255,36 @@ router.get('/status/:sessionId', async (req, res) => {
     });
 });
 
+// ── GET /sessions ────────────────────────────────────────────────────────────
+// Admin dashboard: returns all active sessions with full metadata.
+// For sessions started before startedAt tracking was added, we extract the
+// Unix ms timestamp embedded in the session ID: session-{TS}-{RAND}
+router.get('/sessions', (req, res) => {
+    const sessions = {};
+    activeSessions.forEach((session, sessionId) => {
+        // Fallback: parse timestamp from the session ID itself
+        const idTimestamp = parseInt(sessionId.split('-')[1]) || null;
+        const startedAt   = session.startedAt   || idTimestamp;
+        const lastBeat    = session.lastHeartbeat || startedAt;
+        const now         = Date.now();
+        const uptimeMs    = startedAt ? now - startedAt : null;
+        const idleMs      = lastBeat  ? now - lastBeat  : null;
+
+        sessions[sessionId] = {
+            sessionId:     session.sessionId || sessionId,
+            port:          session.port,
+            subdomain:     session.subdomain,
+            slug:          session.slug,
+            startedAt,
+            lastHeartbeat: lastBeat,
+            tabHiddenAt:   session.tabHiddenAt || null,
+            // Pre-computed for admin display (can still be computed client-side)
+            uptimeMs,
+            idleMs,
+            tabHidden:     !!session.tabHiddenAt,
+        };
+    });
+    return res.json({ ok: true, count: activeSessions.size, sessions });
+});
+
 export default router;
