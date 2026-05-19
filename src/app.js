@@ -243,7 +243,7 @@ setInterval(async () => {
     if (activeSessions.size > 0 && stale.length === 0) {
         console.log(`[Cleanup] ✓ ${activeSessions.size} session(s) healthy`);
     }
-}, 2 * 60 * 1000);
+}, 30 * 1000);
 
 // ── FILE TREE ROUTE ────────────────────────────────────────────────────────
 app.get('/api/tree/:slug', (req, res) => {

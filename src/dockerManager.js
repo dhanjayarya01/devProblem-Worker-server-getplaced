@@ -74,7 +74,7 @@ export async function restoreSessionsFromDocker() {
     }
 }
 
-export async function startContainer(sessionId, workspacePath, hostPort, slug, runtimeEnvironment) {
+export async function startContainer(sessionId, workspacePath, hostPort, slug, runtimeEnvironment, userId) {
     const normalizedPath = workspacePath.replace(/\\/g, '/');
     const nmVolumeName = `codearena-nm-${slug}`;
 
@@ -136,6 +136,7 @@ export async function startContainer(sessionId, workspacePath, hostPort, slug, r
             containerId,
             port: hostPort,
             slug,
+            userId,
             workspacePath,
             testCommand: runtimeEnvironment?.testCommand || 'npm test',
             startedAt: now,

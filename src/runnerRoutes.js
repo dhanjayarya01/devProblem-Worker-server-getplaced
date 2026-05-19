@@ -24,11 +24,28 @@ function isHttpReachable(port, timeout = 3000) {
 
 // ── POST /run-project ──────────────────────────────────────────────────────
 router.post('/run-project', async (req, res) => {
-    const { slug, runtimeEnvironment } = req.body;
-    console.log(`\n[RunProject] Request received -> slug: "${slug}"`);
+    const { slug, runtimeEnvironment, userId } = req.body;
+    console.log(`\n[RunProject] Request received -> slug: "${slug}", userId: "${userId || 'anonymous'}"`);
 
     if (!slug || !isValidSlug(slug)) {
         return res.status(400).json({ error: 'Invalid or missing slug' });
+    }
+
+    // Auto-stop any existing sessions for this user in the background
+    if (userId) {
+        const oldSessions = [];
+        activeSessions.forEach((session, sId) => {
+            if (session.userId === userId) {
+                oldSessions.push(sId);
+            }
+        });
+
+        for (const oldSessionId of oldSessions) {
+            console.log(`[RunProject] User ${userId} starting new project. Auto-cleaning old session: ${oldSessionId}`);
+            // Fire and forget - don't block the new container creation
+            stopContainer(oldSessionId).catch(err => console.error(`[Cleanup] Error stopping old session ${oldSessionId}:`, err.message));
+            destroyWorkspace(oldSessionId).catch(err => console.error(`[Cleanup] Error destroying old workspace ${oldSessionId}:`, err.message));
+        }
     }
 
     const activeCount = getActiveContainerCount();
@@ -48,7 +65,7 @@ router.post('/run-project', async (req, res) => {
         if (!hostPort) throw new Error('No available ports. Try again later.');
         console.log(`[RunProject] Assigned host port: ${hostPort}`);
 
-        await startContainer(sessionId, workspace.workspacePath, hostPort, slug, runtimeEnvironment);
+        await startContainer(sessionId, workspace.workspacePath, hostPort, slug, runtimeEnvironment, userId);
 
         // Return the subdomain URL — no IP:PORT exposed to frontend
         const previewUrl = `https://${sessionId}.${PREVIEW_DOMAIN}`;
