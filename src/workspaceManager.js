@@ -73,8 +73,27 @@ async function createWorkspace(slug) {
 async function destroyWorkspace(sessionId) {
     const workspacePath = getWorkspacePath(sessionId);
     if (fs.existsSync(workspacePath)) {
-        fs.rmSync(workspacePath, { recursive: true, force: true });
-        console.log(`[Workspace] ✓ Removed workspace: ${sessionId}`);
+        try {
+            fs.rmSync(workspacePath, { recursive: true, force: true });
+            console.log(`[Workspace] ✓ Removed workspace: ${sessionId}`);
+        } catch (err) {
+            if (err.code === 'EACCES' || err.code === 'EPERM') {
+                console.log(`[Workspace] Permission denied deleting ${sessionId}, delegating to Docker...`);
+                try {
+                    const { exec } = await import('child_process');
+                    const { promisify } = await import('util');
+                    const execAsync = promisify(exec);
+                    const parentDir = path.dirname(workspacePath).replace(/\\/g, '/');
+                    const baseName = path.basename(workspacePath);
+                    await execAsync(`docker run --rm -v "${parentDir}:/workspaces" alpine rm -rf "/workspaces/${baseName}"`);
+                    console.log(`[Workspace] ✓ Docker successfully deleted workspace: ${sessionId}`);
+                } catch (dockerErr) {
+                    console.error(`[Workspace] ✗ Failed to forcefully delete workspace:`, dockerErr.message);
+                }
+            } else {
+                console.error(`[Workspace] ✗ Error deleting workspace ${sessionId}:`, err.message);
+            }
+        }
     } else {
         console.warn(`[Workspace] Workspace not found on disk: ${sessionId}`);
     }
