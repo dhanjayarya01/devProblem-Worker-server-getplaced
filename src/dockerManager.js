@@ -196,7 +196,8 @@ export async function executeTest(sessionId) {
     console.log(`\n[Docker Exec] Running tests for ${sessionId} using command: ${testCommand}`);
 
     try {
-        const { stdout, stderr } = await execAsync(`docker exec ${containerId} sh -c "${testCommand}"`);
+        const { stdout, stderr } = await execAsync(`docker exec -u 1000:1000 ${containerId} sh -c "${testCommand}"`);
+        // const { stdout, stderr } = await execAsync(`docker exec ${containerId} sh -c "${testCommand}"`);
         console.log(`[Docker Exec] ✓ Tests completed for ${sessionId}`);
         return {
             success: true,
@@ -238,8 +239,9 @@ export async function executeCommand(sessionId, command) {
     if (trimmed.startsWith('cd ') || trimmed === 'cd') {
         const target = trimmed === 'cd' ? '/app' : trimmed.substring(3).trim();
         try {
-            // Verify directory exists and resolve the absolute path
-            const { stdout } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "cd ${target} && pwd"`);
+            // Verify directory exists and resolve the absolute path(changed the docker command to run with non root user )
+            const { stdout } = await execAsync(`docker exec -u 1000:1000 -w ${cmdCwd} ${containerId} sh -c"cd ${target} && pwd"`);
+            // const { stdout } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "cd ${target} && pwd"`);
             session.cwd = stdout.trim();
             return { success: true, logs: '' };
         } catch (err) {
@@ -255,7 +257,8 @@ export async function executeCommand(sessionId, command) {
 
     try {
         const sanitizedCommand = command.replace(/"/g, '\\"');
-        const { stdout, stderr } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "${sanitizedCommand}"`, execOptions);
+        const { stdout, stderr } = await execAsync(`docker exec -u 1000:1000 -w ${cmdCwd} ${containerId} sh -c "${sanitizedCommand}"`, execOptions);
+        // const { stdout, stderr } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "${sanitizedCommand}"`, execOptions);
         return {
             success: true,
             logs: stdout + (stderr ? '\n' + stderr : '')
