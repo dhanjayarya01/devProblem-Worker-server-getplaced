@@ -17,13 +17,13 @@ export function getAllSessions() {
     return result;
 }
 
-function isContainerRunning(containerName) {
+async function isContainerRunning(containerName) {
     try {
-        const output = execSync(
+        const { stdout } = await execAsync(
             `docker ps --filter "name=${containerName}" --format "{{.Names}}"`,
-            { encoding: 'utf-8' }
-        ).trim();
-        return output.includes(containerName);
+            { timeout: 5000 }
+        );
+        return stdout.trim().includes(containerName);
     } catch {
         return false;
     }
@@ -159,13 +159,13 @@ export async function stopContainer(sessionId) {
 
     const containerName = sessionId;
     try {
-        if (isContainerRunning(containerName)) {
+        if (await isContainerRunning(containerName)) {
             console.log(`[Docker] Stopping container: ${containerName}`);
-            await execAsync(`docker stop ${containerName}`);
+            await execAsync(`docker stop ${containerName}`, { timeout: 15000 });
             console.log(`[Docker] ✓ Container stopped: ${containerName}`);
         }
         try {
-            await execAsync(`docker rm ${containerName}`);
+            await execAsync(`docker rm ${containerName}`, { timeout: 15000 });
             console.log(`[Docker] ✓ Container removed: ${containerName}`);
         } catch {
             // Already removed — ignore
@@ -241,7 +241,7 @@ export async function executeCommand(sessionId, command) {
         const target = trimmed === 'cd' ? '/app' : trimmed.substring(3).trim();
         try {
             // Verify directory exists and resolve the absolute path(changed the docker command to run with non root user )
-            const { stdout } = await execAsync(`docker exec -u 1000:1000 -w ${cmdCwd} ${containerId} sh -c"cd ${target} && pwd"`);
+            const { stdout } = await execAsync(`docker exec -u 1000:1000 -w ${cmdCwd} ${containerId} sh -c "cd ${target} && pwd"`, { timeout: 10000 });
             // const { stdout } = await execAsync(`docker exec -w ${cmdCwd} ${containerId} sh -c "cd ${target} && pwd"`);
             session.cwd = stdout.trim();
             return { success: true, logs: '' };
@@ -254,7 +254,7 @@ export async function executeCommand(sessionId, command) {
 
     // Use a longer timeout for mvn compile which can take time on first run
     const isMvnCompile = command.trim().startsWith('mvn compile');
-    const execOptions = isMvnCompile ? { timeout: 90000 } : {};
+    const execOptions = { timeout: isMvnCompile ? 90000 : 10000 };
 
     try {
         const sanitizedCommand = command.replace(/"/g, '\\"');

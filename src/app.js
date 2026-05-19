@@ -208,12 +208,14 @@ setInterval(async () => {
         // Check Docker first — avoids a misleading error log if it's already gone.
         let isRunning = false;
         try {
-            const { execSync } = await import('child_process');
-            const out = execSync(
+            const { promisify } = await import('util');
+            const { exec } = await import('child_process');
+            const execAsync = promisify(exec);
+            const { stdout } = await execAsync(
                 `docker ps --filter "name=${sessionId}" --format "{{.Names}}"`,
-                { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'] }
-            ).trim();
-            isRunning = out.includes(sessionId);
+                { timeout: 5000 }
+            );
+            isRunning = stdout.trim().includes(sessionId);
         } catch { isRunning = false; }
 
         if (!isRunning) {
